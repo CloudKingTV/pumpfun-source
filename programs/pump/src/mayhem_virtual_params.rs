@@ -11,8 +11,11 @@ use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 #[derive(Accounts)]
 pub struct SetMayhemVirtualParams<'info> {
     /// CHECK: The signer constraint and foreign-program PDA seeds authenticate this account.
+    // AccountInfo is stored by value (48 bytes). UncheckedAccount is only a reference,
+    // and that smaller wrapper places bonding_curve at offset 440. The captured
+    // AccountsExit adds 488, which is this struct once the vault signer is an AccountInfo.
     #[account(mut, signer, seeds = [b"sol-vault"], bump, seeds::program = MAYHEM_ID)]
-    pub sol_vault_authority: UncheckedAccount<'info>,
+    pub sol_vault_authority: AccountInfo<'info>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = sol_vault_authority, associated_token::token_program = token_program)]
     pub mayhem_token_vault: InterfaceAccount<'info, TokenAccount>,
     pub mint: InterfaceAccount<'info, Mint>,

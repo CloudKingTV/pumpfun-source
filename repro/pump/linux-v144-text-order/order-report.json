@@ -1,0 +1,14 @@
+{
+  "mac_selectors": 940,
+  "linux_assigned": 889,
+  "exact_name": 21,
+  "body_match": 868,
+  "missing": 51,
+  "missing_reasons": {
+    "no-linux-symbol": 17,
+    "absent-from-mac-elf": 33,
+    "symbol-not-in-rlib": 1
+  },
+  "indexed_symbols": 6199,
+  "output": "repro/pump/linux-v144-text-order/ordered.ld"
+}

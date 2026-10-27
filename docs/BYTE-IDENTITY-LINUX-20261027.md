@@ -94,37 +94,70 @@ Same-offset `.text` identity understates recovery. Functions are not laid out at
 
 Inventory: `repro/pump/main-contract-round29-20261027/inventory.json.gz` (1,035 original windows). A window is normalized-equal when every byte matches after masking internal relative calls and `lddw` values that point into a section. Line-number immediates are not masked.
 
-| Build | Raw-equal windows | Normalized windows | Original text covered by normalized windows |
-| --- | ---: | ---: | ---: |
-| Linux v1.44 | 119 / 1,035 | **723 / 1,035 (69.9%)** | **886,312 / 1,792,208 (49.5%)** |
-| Round29 Mac | 135 / 1,035 | **723 / 1,035 (69.9%)** | **886,312 / 1,792,208 (49.5%)** |
+Each row was scored with `scripts/build_and_compare_originals.py` after that step. The Mac row is the published Round29 artifact, not a rebuild from this run.
 
-The Linux codegen matches the Mac checkpoint's normalized set exactly, including the covered byte count. It loses 16 raw-equal windows (10,872 bytes). All 16 are still normalized-equal. They are the bodies whose absolute pointers or call offsets were pinned by the Mac linker script and do not survive the default Linux link. Linux does embed the original `/home/runner/work/platform-tools` strings (9 hits in the unstripped ELF, 8 in the original, 0 `/Users/runner` hits). The Mac artifact has the opposite path (0 and 9).
+| Build | Unstripped SHA-256 | Raw-equal | Normalized | Normalized text |
+| --- | --- | ---: | ---: | ---: |
+| Linux v1.44, default link | `60083be78b2e64d072eed2fe7bdc22a134ff237cc504df61db080dd5ff7154a3` | 119 / 1,035 | 723 / 1,035 (69.9%) | 886,312 / 1,792,208 (49.45%) |
+| Linux, Mac order translated | `7ab771d5f7e6571fc856f9f87c75f3a5f552bd9469dacd0ca50f040b80380c5f` | 111 / 1,035 | 723 / 1,035 (69.9%) | 886,312 / 1,792,208 (49.45%) |
+| Linux, source layout | `3af0afefb4f6c2789b160d41061864415d645114e5fdb7ac524d5efcc38d6f68` | 119 / 1,035 | 729 / 1,035 (70.4%) | 889,888 / 1,792,208 (49.65%) |
+| Linux, layout + `AccountInfo` vault | `27ba004dfe7899c09b778e3a37cb9757a6d9c505e42339b9dbd15213f9245bf8` | 119 / 1,035 | **730 / 1,035 (70.5%)** | **890,464 / 1,792,208 (49.69%)** |
+| Round29 Mac | `2e2e5dbd8f72cc86c2801c911ab9844ee6582b8576ed1c251a419d171de19157` | 135 / 1,035 | 723 / 1,035 (69.9%) | 886,312 / 1,792,208 (49.45%) |
 
-312 windows remain unmatched (905,896 original text bytes). Against same-size candidate symbols, the closest misses are a single instruction. The instruction is `stw [r10-248], <line>` (opcode 0x62). Examples from the Linux build:
+Meaningful-ELF prefix identity (1,934,800 original bytes) moved from 870,097 (44.97%) on the default Linux link to 862,134 (44.56%) under the translated order, 869,725 (44.95%) after the layout edit, and 870,530 (44.99%) after the vault type edit. Whole-ELF identity is still false. The latest stripped candidate is SHA-256 `5213d3c76f7992a7acb87b065d30a27d8024b6bda748e904814882536fc10f26` (1,838,168 bytes).
 
-| Original | Bytes | Candidate symbol | Original line immediate | Candidate line immediate |
-| --- | ---: | --- | ---: | ---: |
-| `0x410b0` | 520 | `pump_recovered::migrate::execute` closure | 280 | 55 |
-| `0x4bb40` | 520 | `pump_recovered::migrate_v2::execute` closure | 309 | 109 |
-| `0x135580` | 672 | `toggle_create_v2` | 114 | 72 |
-| `0x135820` | 672 | `toggle_cashback_enabled` | 121 | 77 |
-| `0x135ac0` | 672 | `toggle_mayhem_mode` | 149 | 87 |
+### Step 1 — Linux `.text` order
 
-The file pointer next to those stores is `programs/pump/src/lib.rs` in both binaries. Relocation-backed `Location` records tell the same story: the original `programs/pump/src/lib.rs` has static locations through line 2664, while the reconstructed file is 529 lines and its `require_neq!` for `toggle_create_v2` sits on line 72. Original `migrate.rs` records line 659 (reconstructed file is 84 lines) and `migrate_v2.rs` records line 820 (reconstructed file is 141 lines). Inserting blank lines to force `line!()` would be fabricated coordinates, not recovered source, and would also shift locations that already match.
+`scripts/pump_linux_text_order.py` rewrites the Round29 `ordered.ld` onto the Linux rlibs. It pairs each Mac selector with a Linux symbol by exact name when the instantiating hash survived, otherwise by the stable prefix plus the normalized body, then points the selector at the archive member that contains that section. The script it wrote is `repro/pump/linux-v144-text-order/ordered.ld`.
 
-Other one-slot misses are real constants rather than line numbers. `SetMayhemVirtualParams`'s `AccountsExit` is 576 bytes and differs by `add64 r8, 488` versus `add64 r8, 440`. That 48-byte gap is consistent with one extra exited account or a larger frame, and it is not fixed here.
+| Mapping | Count |
+| --- | ---: |
+| Mac selectors | 940 |
+| Assigned on Linux | 889 |
+| Exact symbol-name match | 21 |
+| Prefix + normalized body | 868 |
+| Unmapped | 51 |
 
-Five original 56-byte windows are `TypeId` materializers (`lddw` of two halves, two stores, `exit`). Their constants do not occur in the Linux or Mac candidate. Four candidate `core::error::Error::type_id` bodies of the same size write a different id (`0xf40641168066fddd` / `0xa407aa3eaf931aef`). The original ids are `0x1b204ea073ccb1b7` / `0x0e61d2cabdb5e3d` (four copies) and `0xa3f5295a8e9e84c1` / `0xca6c34d708d27ee8` (one copy). Those are type-path hashes, not something a line-number edit repairs.
+The pump object name stayed `pump_recovered.pump_recovered.94c3b8b0e9dec8ee-cgu.0.rcgu.o` under the text-order wrapper, and the link map shows those selectors being placed. Normalized coverage did not move. Raw coverage fell from 119 to 111. The translated order is not a Linux substitute for the Mac script: 51 sections fall through to the wildcard, and ambiguous monomorphizations are paired by body rather than by which call sites the original linked. The default Linux link remains the better raw score, so later rebuilds in this run did not pass `--text-section-order`.
+
+### Step 2 — source layout for line immediates
+
+The line number that reaches the binary is the line of the `require_neq!` / `ok_or_else` invocation, stored as `stw [r10-248], <line>` next to an `lddw` of the file path. Stack locations in the original, not the relocation-backed maxima, are what those near-miss windows compare:
+
+| File | Stack lines in the original | Line after formatting | What matched |
+| --- | --- | --- | --- |
+| `programs/pump/src/lib.rs` | 114, 121, 149 (toggles; file also has later lines through 2562, and a relocation record at 2664) | 114, 121, 149 | the three 672-byte toggle windows |
+| `programs/pump/src/migrate.rs` | 280 and 282 (relocation record at 659) | 280 | the 520-byte closure at 280 |
+| `programs/pump/src/migrate_v2.rs` | 309, 313, 326 (relocation record at 820) | 309 and 313 | the two 520-byte closures at 309 and 313 |
+
+Formatting is the recovered layout of statements that were already in those files: `pub use` groups, account attributes, seed lists, and the toggle handlers. No blank lines were inserted to push a `line!()`. `lib.rs` is now 1,058 lines, `migrate.rs` 490, `migrate_v2.rs` 506. That is enough for the stack anchors above and not enough for the relocation records at 2664, 659, and 820. Those records still describe source this tree does not contain.
+
+The same closure body is compiled once here and several times in the original, with a different line each time. After this step the nearest misses are that second copy: migrate 282 against our 280, migrate_v2 326/212/222 against our 309. One function cannot emit two line numbers.
+
+This step is what moved the score from 723 to 729 normalized windows (886,312 to 889,888 covered bytes). Raw stayed 119: the new windows still differ in call immediates, which normalization masks.
+
+### Step 3 — `SetMayhemVirtualParams` frame and `TypeId`
+
+`AccountsExit` for `SetMayhemVirtualParams` was 576 bytes on both sides and differed by a single `add64 r8, imm`: 488 in the original, 440 in the candidate. Host layout of the same field types puts `bonding_curve` at offset 440 when `sol_vault_authority` is `UncheckedAccount` (an 8-byte reference) and at offset 488 when that field is `AccountInfo` (48 bytes, `repr(C)`). Offset 128, the other positive struct add in that function, stays the token-vault field either way, which is why the rest of the immediates already matched. The field is now `AccountInfo<'info>`. The rebuilt exit adds 488. That window is normalized-equal, taking the score from 729 to 730 (890,464 covered bytes). It is not raw-equal; the calls inside it still point at different addresses.
+
+The five 56-byte `TypeId` materializers are unchanged by the source edits. The Linux build still writes:
+
+| Copies | Low half | High half | Symbol |
+| --- | ---: | --- | --- |
+| 4 | `0x9072a1a0a1870b59` | `0x921767e8c21220c3` | `core::error::Error::type_id` |
+| 1 | `0xfa7019cea288c066` | `0xda447f87a8571939` | `<T as Any>::type_id` |
+
+The original writes `0x0e61d2cabdb5e3d` / `0x1b204ea073ccb1b7` (four copies) and `0xca6c34d708d27ee8` / `0xa3f5295a8e9e84c1` (one copy). The Mac artifact writes a third pair. Editing pump structs, line breaks, and the vault field did not change the Linux constants, so they are not literals and they are not a fingerprint of the pump source that this run edited. They are the compiler's type-id hash for dependency impls (`core::error::Error::type_id` and one `Any` impl). Matching them means reproducing that dependency's stable crate id, which cargo derives from crate metadata the original build did not leave in the stripped ELF. Writing the original halves in as constants would not be the function the compiler emits, and it would not survive the next rustc.
 
 ## What is still byte-different, and what to do next
 
-Whole-ELF identity is still false for Pump. Normalized coverage is unchanged from Round29: 69.9% of windows, 49.5% of original text. The Linux rebuild is the right host for the original sysroot strings, and it reproduces every normalized window the Mac checkpoint had.
+Whole-ELF identity is still false. The best Linux score in this run is 730 / 1,035 normalized windows (70.5%) and 890,464 / 1,792,208 text bytes (49.69%), with 119 raw-equal windows. Meaningful-ELF prefix identity is 870,530 / 1,934,800 (44.99%).
 
-Next work, in order:
+Still open:
 
-1. Regenerate the `.text` input order on Linux now that `rust-lld` resolves. Match original addresses for the 723 normalized windows before chasing new bodies. That is what recovered the 16 raw windows on Mac, and the Linux object name is `pump_recovered.pump_recovered.94c3b8b0e9dec8ee-cgu.0.rcgu.o`.
-2. Recover real file layout for the source locations above (`lib.rs` through at least line 2664, `migrate.rs` through 659, `migrate_v2.rs` through 820, `volume_accumulator.rs`, `create_v2.rs`) so the `stw` line immediates match. Do not pad blank lines.
-3. Explain the `AccountsExit` 488-versus-440 immediate and the five unmatched `TypeId` bodies before editing those handlers.
-4. Install Ghidra 12.1.4 and the sBPF processor from `docs/REA.md` if decompiler pseudocode is needed. Byte identity still has to be decided by the compiler output, not by the decompiler.
-5. The other maintained programs were not rebuilt in this run. Their captured hashes match mainnet. Prior checkpoints remain: Fees 580/585 normalized windows, Mayhem 430/441, PumpSwap 640/785, Donation Relay 492/492 with meaningful-ELF identity.
+1. The duplicate closures whose only difference is a second line number (migrate 282, migrate_v2 326 and the 212/222 copies). They need a second source statement, not a second copy of the same line.
+2. Relocation-backed locations past the end of the formatted files: `lib.rs` 2664, `migrate.rs` 659, `migrate_v2.rs` 820, plus the other pump files whose stack lines still disagree (`create_v2.rs`, `buy_v2.rs`, `trade_v3.rs`, `volume_accumulator.rs`).
+3. A Linux `.text` order derived from the 730 matched windows' original addresses. Translating the Mac script lost 8 raw windows (119 → 111) and was not kept for the later builds.
+4. `TypeId` constants, which track dependency crate identity rather than a pump source literal.
+5. Ghidra 12.1.4 and the sBPF processor from `docs/REA.md` if decompiler pseudocode is needed. Byte identity is still decided by the compiler output.
+6. The other maintained programs were not rebuilt in this run. Their captured hashes match mainnet. Prior checkpoints remain: Fees 580/585 normalized windows, Mayhem 430/441, PumpSwap 640/785, Donation Relay 492/492 with meaningful-ELF identity.
