@@ -26,15 +26,39 @@ def check_script(default, script):
     return len(lines)
 
 
+def rust_lld_host(system=None, machine=None):
+    """Host triple of the platform-tools ``rust-lld`` used to link sBPF.
+
+    The ordered-text recipe used to key only on ``platform.machine()`` and
+    always selected an Apple Darwin rustlib. On Linux that path does not
+    exist, so ``--text-section-order`` could not run the build that matches
+    the original program's ``/home/runner`` sysroot strings.
+    """
+    system = system if system is not None else platform.system()
+    machine = machine if machine is not None else platform.machine()
+    triples = {
+        ('Darwin', 'arm64'): 'aarch64-apple-darwin',
+        ('Darwin', 'x86_64'): 'x86_64-apple-darwin',
+        ('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu',
+        ('Linux', 'aarch64'): 'aarch64-unknown-linux-gnu',
+    }
+    try:
+        return triples[(system, machine)]
+    except KeyError as error:
+        raise SystemExit(
+            f'unsupported host for the text-order linker: {system} {machine}'
+        ) from error
+
+
 def configure(order, out, sdk, crate_name, physical_wrapper):
     default = (HERE / 'pump_text_layout_default.ld').read_text()
     script = Path(order).read_text()
     count = check_script(default, script)
     dest = Path(out) / 'ordered.ld'
     dest.write_text(script)
-    host = {'arm64': 'aarch64-apple-darwin', 'x86_64': 'x86_64-apple-darwin'}[platform.machine()]
+    host = rust_lld_host()
     linker = Path(sdk) / f'rust/lib/rustlib/{host}/bin/rust-lld'
-    assert linker.is_file()
+    assert linker.is_file(), f'missing rust-lld for {host}: {linker}'
     files = [HERE / name for name in ['pump_text_layout.py', 'pump_text_layout_rustc.py',
              'pump_text_layout_linker.py', 'pump_text_layout_default.ld']]
     record = {'scope': 'Optional main-only compiler/link recipe; no original ELF input or byte patching.',
